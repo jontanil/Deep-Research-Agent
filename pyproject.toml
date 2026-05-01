@@ -1,0 +1,22 @@
+[project]
+name = "researchagent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "deepagents>=0.4.5",
+    "flask-core>=2.9.0",
+    "flask-cors>=6.0.2",
+    "flask[async]>=3.1.3",
+    "google-search-results>=2.4.2",
+    "langchain>=1.2.10",
+    "langchain-community>=0.4.1",
+    "langchain-mcp-adapters>=0.2.1",
+    "langchain-openrouter>=0.1.0",
+    "langfuse>=3.14.5",
+    "langgraph-checkpoint-postgres>=3.0.4",
+    "loguru>=0.7.3",
+    "python-dotenv>=1.2.2",
+]

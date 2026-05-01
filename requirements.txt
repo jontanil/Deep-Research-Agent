@@ -1,0 +1,12 @@
+deepagents
+langchain
+langchain-openrouter
+langchain-community
+google-search-results
+python-dotenv
+beautifulsoup4
+langfuse
+flask[async]
+flask-cors
+loguru
+langgraph-checkpoint-postgres
