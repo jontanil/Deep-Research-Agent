@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_research_returns_content_and_references(client):
     resp = client.post("/research", json={"query": "test query"})
     assert resp.status_code == 200
@@ -6,3 +9,10 @@ def test_research_returns_content_and_references(client):
     assert isinstance(body["content"], str)
     assert "[1]" in body["content"]
     assert body["references"] == {"Test Source — https://example.com": 1}
+
+
+@pytest.mark.parametrize("payload", [{}, {"query": ""}, {"query": "   "}])
+def test_research_rejects_empty_missing_or_blank_query(client, payload):
+    resp = client.post("/research", json=payload)
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "No query found"

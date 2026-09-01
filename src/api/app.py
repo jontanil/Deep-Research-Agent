@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from langfuse import propagate_attributes
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -19,6 +19,9 @@ deepagent = create_research_agent(settings)
 
 @app.post("/research", response_model=ResearchResponse)
 async def research(payload: ResearchRequest):
+    if not payload.query.strip():
+        raise HTTPException(status_code=400, detail="No query found")
+
     config: RunnableConfig = {
         "configurable": {"thread_id": str(uuid.uuid4())},
         "callbacks": [langfuse_handler],
