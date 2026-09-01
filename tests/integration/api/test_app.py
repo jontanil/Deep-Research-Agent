@@ -16,3 +16,15 @@ def test_research_rejects_empty_missing_or_blank_query(client, payload):
     resp = client.post("/research", json=payload)
     assert resp.status_code == 400
     assert resp.json()["detail"] == "No query found"
+
+
+def test_uncaught_exception_returns_500_json(client, monkeypatch):
+    from src.api import app as app_module
+
+    async def boom(input_state, config=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app_module.deepagent, "ainvoke", boom)
+    resp = client.post("/research", json={"query": "test query"})
+    assert resp.status_code == 500
+    assert resp.json() == {"status": "error", "message": "Internal server error"}

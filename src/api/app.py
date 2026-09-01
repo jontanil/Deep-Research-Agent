@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from langfuse import propagate_attributes
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -15,6 +16,15 @@ app = FastAPI()
 
 settings = get_settings()
 deepagent = create_research_agent(settings)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception):
+    logger.exception(str(exc))
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "message": "Internal server error"},
+    )
 
 
 @app.post("/research", response_model=ResearchResponse)
