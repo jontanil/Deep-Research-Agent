@@ -1,6 +1,6 @@
 # FastAPI Migration + Config Externalization Implementation Plan
 
-**Source:** SPEC — `docs/specs/SPEC-fastapi-migration-2026_09_01.md`
+**Source:** SPEC — `.docs/specs/SPEC-fastapi-migration-2026_09_01.md`
 
 **Goal:** Replace the Flask API layer with a FastAPI async `POST /research` endpoint preserving the exact `{content, references}` contract, and externalize all hardcoded runtime values (GCP project, Gemini models, credentials path, result/log paths, observability metadata) into `.env`-backed `AgentSettings`.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI, uvicorn (`[standard]`), pydantic-settings, Pydantic v2, pytest + httpx (TestClient) + pytest-cov, uv. Removes Flask, flask-cors, and the stray `flask-core` entry.
 
-**Verification Source:** `docs/specs/SPEC-fastapi-migration-2026_09_01.md` § Verification Plan (rows 1-9) + Implementation Decisions (result path, `.env` anchoring, CORS scope, dead-code cleanup, run command).
+**Verification Source:** `.docs/specs/SPEC-fastapi-migration-2026_09_01.md` § Verification Plan (rows 1-9) + Implementation Decisions (result path, `.env` anchoring, CORS scope, dead-code cleanup, run command).
 
 ---
 
@@ -18,7 +18,8 @@
 - **FastAPI/uvicorn are NOT installed** in `.venv`; Flask/flask-cors/flask-core ARE (`pyproject.toml:10-12`). Dependency swap must precede all FastAPI work.
 - **No `.env` file exists** in the repo. Confirmed in installed `pydantic_settings/sources/providers/dotenv.py:102` that a missing `env_file` is silently ignored (`if env_path.is_file()`), so tests can run without `.env`. Required fields `SERPAPI_API_KEY` / `POSTGRES_URL` must be supplied via `os.environ` in conftest.
 - **`src/tools/ddg_mcp.py:15` runs `asyncio.run(_client.get_tools())` at import** (spawns `uvx duckduckgo-mcp-server`, requires `uvx` + network). Tests MUST stub `sys.modules["src.tools.ddg_mcp"]` (with `tools = []`) in conftest before any `src.agents.*` / `src.api.app` import.
-- **ADC file exists at `src/application_default_credentials.json`** and `src/config/llm_models.py` loads it at import. Tests therefore do NOT need to stub `llm_models`; they reuse the real module (credentials load is local, no network). The integration tests patch `app.deepagent` after import, so the real agent graph is only built at import (offline).
+- **ADC file at `src/application_default_credentials.json` is an INVALID placeholder** (all fields empty, `"type": ""`). `google.auth.load_credentials_from_file` raises `DefaultCredentialsError: The file ... does not have a valid type` at import (verified). Tests MUST patch `google.auth.load_credentials_from_file` in conftest (BEFORE any `src.*` import) to return a dummy credentials object; with that patch the real `llm_models` module imports and `create_model()`/`create_reasoning_model()` construct offline. The integration tests patch `app.deepagent` after import, so the real agent graph is only built at import (offline — verified `CompiledStateGraph`). See `BUG-adc-credentials-2026_09_01.md`.
+- **`src/config/agent_configs.py:1` imports `langgraph.store.postgres` → `psycopg`, which fails on this machine** (`ImportError: no pq wrapper available ... libpq library not found`; the venv has pure-python psycopg with no binary wrapper). This blocks `import src.agents.research` for both the app and the tests. Task 1 adds `psycopg[binary]` to the dependency set (verified: with it, `from langgraph.store.postgres import PostgresStore` imports). The `make_store`/`make_backend` definitions stay (disabled feature), the import becomes loadable.
 - **Loguru auto-creates parent dirs** for file sinks (`_file_sink.py:221-223` `_create_dirs`), so `logging.py` needs no explicit `mkdir` when switching to `settings.LOGS_DIR`.
 - **`get_settings()` is `@lru_cache(maxsize=1)`** (`settings.py:25`). The FastAPI endpoint MUST call `get_settings()` at request time, and conftest MUST `cache_clear()` per test so `monkeypatch.setenv` overrides take effect.
 - **TestClient must use `raise_server_exceptions=False`** so the Task 11 RED step (unhandled 500) returns a response body instead of re-raising into the test.
@@ -64,10 +65,21 @@ tests/
 
 **Depends on:** None
 
-**Step 1: Edit `pyproject.toml` dependencies**
+**Step 1: Edit `pyproject.toml` dependencies + build backend**
 
 - Key change: remove `flask-core>=2.9.0` (line 10), `flask-cors>=6.0.2` (line 11), `flask[async]>=3.1.3` (line 12). Add `fastapi` and `uvicorn[standard]` to the `dependencies` list (keep `python-dotenv` — pydantic-settings needs it). Do NOT touch `langchain-openrouter` (out of scope).
+- Add `psycopg[binary]` to the `dependencies` list — required so `src/config/agent_configs.py:1` can import (`langgraph.store.postgres` → `psycopg`; the pure-python wheel fails with `ImportError: no pq wrapper available` on this machine). Without it, `import src.agents.research` fails for both the app and the tests. Verified: with the binary wrapper, `from langgraph.store.postgres import PostgresStore` imports.
 - Add a `[project.scripts]` table: `deepagent-api = "src.api.app:main"` (the `main()` will be added in Task 9; do not run the script yet).
+- Add a `[build-system]` table so `uv sync` installs the project editable and generates the `deepagent-api` console script (verified: without a build backend, uv does not install the project and no script is produced):
+  ```toml
+  [build-system]
+  requires = ["hatchling"]
+  build-backend = "hatchling.build"
+
+  [tool.hatch.build.targets.wheel]
+  packages = ["src"]
+  ```
+  The `packages = ["src"]` line is required because the project name (`researchagent`) differs from the top-level package (`src`); hatchling auto-includes subpackages.
 
 **Step 2: Edit `requirements.txt`**
 
@@ -76,12 +88,14 @@ tests/
 **Step 3: Regenerate lockfile + sync venv**
 
 Run: `uv lock; if ($?) { uv sync }`
-Expected: lockfile updates with fastapi/uvicorn; flask/flask-cors/flask-core removed from the resolved set.
+Expected: lockfile updates with fastapi/uvicorn; flask/flask-cors/flask-core removed from the resolved set; the project itself is built and installed editable (`researchagent` dist-info appears in `.venv\Lib\site-packages`).
 
 **Step 4: Verify**
 
-Run: `uv run python -c "import fastapi, uvicorn; print(fastapi.__version__, uvicorn.__version__)"`
-Expected: prints two version numbers, no `ModuleNotFoundError`.
+Run: `uv run python -c "import fastapi, uvicorn, psycopg; print(fastapi.__version__, uvicorn.__version__)"`
+Expected: prints two version numbers, no `ModuleNotFoundError` (psycopg imports too, proving the `agent_configs` chain is loadable).
+Run: `uv run python -c "from importlib.metadata import distribution; print(distribution('researchagent').version)"`
+Expected: prints `0.1.0` — the project is installed, so the `deepagent-api` console script exists (do not run it until Task 9 adds `main()`).
 
 **Step 5: Commit**
 
@@ -107,14 +121,15 @@ git commit -m "chore: swap Flask for FastAPI and uvicorn"
 
 **Step 1: Add dev dependencies + pytest config to `pyproject.toml`**
 
-- Key change: add `[dependency-groups]` with `dev = ["pytest>=8.3", "pytest-cov>=5", "httpx>=0.27"]`. Add `[tool.pytest.ini_options]` with `testpaths = ["tests"]`.
+- Key change: add `[dependency-groups]` with `dev = ["pytest>=8.3", "pytest-cov>=5", "httpx>=0.27"]`. Add `[tool.pytest.ini_options]` with `testpaths = ["tests"]` and `pythonpath = ["."]` (project root). `pythonpath` (pytest ≥7) inserts the project root into `sys.path` so `import src.*` works under `uv run pytest` even if the project is not installed — verified that without it, pytest cannot resolve `src` (`ModuleNotFoundError` at collection). Task 1's editable install makes it work too; this is belt-and-suspenders.
 
 **Step 2: Create `tests/conftest.py`**
 
 - Key change: at module top-level (BEFORE any `src.*` import), in order:
-  1. `os.environ.setdefault("SERPAPI_API_KEY", "test-key")` and `os.environ.setdefault("POSTGRES_URL", "postgresql://localhost/test")` (required fields with no defaults).
+  1. `os.environ.setdefault("SERPAPI_API_KEY", "test-key")` and `os.environ.setdefault("POSTGRES_URL", "postgresql://localhost/test")` (required fields with no defaults). Also `os.environ.setdefault("USER_AGENT", "deepagent-test")` (silences the serpapi import warning).
   2. `os.environ.setdefault("LOGS_DIR", tempfile.mkdtemp(prefix="deepagent-test-logs-"))` — must be set before `src.observability.logging` is first imported (it captures settings at import, `logging.py:7-9`).
-  3. Stub the import-time `uvx` spawn: build `types.ModuleType("src.tools.ddg_mcp")`, set `.tools = []`, insert into `sys.modules["src.tools.ddg_mcp"]`.
+  3. Neutralize the invalid ADC file (`BUG-adc-credentials-2026_09_01.md`): `import google.auth; google.auth.load_credentials_from_file = lambda *a, **k: (object(), None)` BEFORE any `src.*` import — otherwise `src.config.llm_models` raises `DefaultCredentialsError` at import. Verified: with this patch the module imports and `create_model()`/`create_reasoning_model()` construct offline (a dummy `object()` credential is accepted by the `ChatGoogleGenerativeAI` constructor).
+  4. Stub the import-time `uvx` spawn: build `types.ModuleType("src.tools.ddg_mcp")`, set `.tools = []`, insert into `sys.modules["src.tools.ddg_mcp"]`.
 - Module-level constant `LOGS_TEST_DIR = Path(os.environ["LOGS_DIR"])` for Task 14 to assert against.
 - Fixtures:
   - `clear_settings_cache` (autouse): calls `src.config.settings.get_settings.cache_clear()` before every test so `monkeypatch.setenv` works with the lru_cache (`settings.py:25`).
@@ -209,6 +224,7 @@ git commit -m "feat: add project-root path resolution helper"
   - `RESULT_OUTPUT_PATH == "Result.md"`
   - `LOGS_DIR == "logs"`
   - `LANGFUSE_TAGS == ["deepagent"]` and `LANGFUSE_CALL_TYPE == "deepagent"`
+  - Key precondition: `monkeypatch.delenv("LOGS_DIR", raising=False)` first. conftest sets the `LOGS_DIR` env var to a temp dir (for Task 14), and pydantic-settings gives env precedence over field defaults — without the `delenv`, `AgentSettings().LOGS_DIR` is the temp dir and this assertion can never pass.
 - Test: `test_agent_settings_reads_env_override` — `monkeypatch.setenv("GEMINI_MODEL", "custom-model")`, then `get_settings.cache_clear()`; key assertion: `get_settings().GEMINI_MODEL == "custom-model"`.
 - Setup: default pydantic-settings behavior; conftest autouse fixture clears the lru cache.
 
@@ -257,8 +273,9 @@ git commit -m "feat: externalize runtime values into AgentSettings"
 
 - Test: `test_create_model_uses_settings` — `monkeypatch.setattr(llm_models, "get_settings", lambda: FakeSettings(GEMINI_MODEL="custom-model", GCP_PROJECT_ID="custom-project"))` and `monkeypatch.setattr(llm_models, "ChatGoogleGenerativeAI", CapturingClass)` where `CapturingClass.__init__` records kwargs into a list. Call `llm_models.create_model()`. Key assertion: `captured["model"] == "custom-model"` and `captured["project"] == "custom-project"`.
 - Test: `test_create_reasoning_model_uses_settings` — same patching with `GEMINI_REASONING_MODEL="custom-reasoning"`; call `create_reasoning_model("high")`. Key assertion: `captured["model"] == "custom-reasoning"` and `captured["thinking_level"] == "high"`.
-- Setup: `FakeSettings` is a plain object with the four needed attributes (`GCP_PROJECT_ID`, `GEMINI_MODEL`, `GEMINI_REASONING_MODEL`, `GEMINI_CREDENTIALS_FILE`). The real `llm_models` module is imported normally (ADC file present, credentials load is local-only); only the call-time `get_settings` global and the `ChatGoogleGenerativeAI` class are patched.
-- Expected failure (RED): the captured `model` is the hardcoded `"gemini-3-flash-preview"` regardless of `FakeSettings`, so `assert captured["model"] == "custom-model"` fails.
+- Test: `test_credentials_loaded_from_settings_path` — covers the "credentials from config" half of the SPEC criterion. Patch `google.auth.load_credentials_from_file` to record its filename argument and return `(object(), None)`; `monkeypatch.setattr(llm_models, "get_settings", lambda: FakeSettings(GCP_PROJECT_ID="p", GEMINI_MODEL="m", GEMINI_REASONING_MODEL="r", GEMINI_CREDENTIALS_FILE="custom-creds.json"))`; `importlib.reload(llm_models)`. Key assertion: the recorded path == `"custom-creds.json"` (the module-level credential load reads the settings value). Note: `importlib.reload` re-executes the module against the patched globals; the conftest `google.auth` patch keeps the file load non-crashing.
+- Setup: `FakeSettings` is a plain object with the four needed attributes (`GCP_PROJECT_ID`, `GEMINI_MODEL`, `GEMINI_REASONING_MODEL`, `GEMINI_CREDENTIALS_FILE`). The real `llm_models` module is imported normally (the invalid ADC file is neutralized by conftest's `google.auth` patch — `BUG-adc-credentials-2026_09_01.md`); only the call-time `get_settings` global and the `ChatGoogleGenerativeAI` class are patched.
+- Expected failure (RED): the captured `model` is the hardcoded `"gemini-3-flash-preview"` regardless of `FakeSettings`, so `assert captured["model"] == "custom-model"` fails (and, for the credentials test, the recorded path is the hardcoded `src/application_default_credentials.json`, so the `"custom-creds.json"` assertion fails).
 
 **Step 2: Run tests — expect RED**
 
@@ -274,7 +291,7 @@ Expected failure: `AssertionError: assert 'gemini-3-flash-preview' == 'custom-mo
 **Step 4: Run tests — expect GREEN**
 
 Run: `uv run pytest tests/unit/config/test_llm_models.py -v`
-Expected: `2 passed`
+Expected: `3 passed`
 
 **Step 5: Refactor**
 
@@ -306,12 +323,13 @@ These are characterization tests for preserved behavior: `clean_output` already 
 
 - Test: `test_clean_output_converts_citations_to_numbers` — input `"See [[[Alpha — https://a.com]]] and [[[Beta — https://b.com]]]"`. Key assertions: content contains `[1]` and `[2]` (in citation order), `references == {"Alpha — https://a.com": 1, "Beta — https://b.com": 2}`.
 - Test: `test_clean_output_deduplicates_citations` — input uses the same citation marker twice. Key assertions: references has one entry with value `1`, both occurrences replaced with `[1]`.
+- Test: `test_clean_output_no_citations_unchanged` — boundary: input `"plain text without any citation markers"`. Key assertions: content is unchanged and `references == {}`.
 - Setup: none — pure function. Import via `from src.agents.research import clean_output`.
 
 **Step 2: Run tests**
 
 Run: `uv run pytest tests/unit/agents/test_research.py -v`
-Expected: `2 passed` on the unchanged implementation (documented exception to red-first: this is a regression test for existing behavior, per SPEC "preserve the exact contract").
+Expected: `3 passed` on the unchanged implementation (documented exception to red-first: this is a regression test for existing behavior, per SPEC "preserve the exact contract").
 
 **Step 3: Refactor**
 
@@ -448,6 +466,7 @@ Expected failure: `ModuleNotFoundError: No module named 'flask'` (Task 1 removed
     - `with propagate_attributes(session_id=f"deepagent-session-{uuid.uuid4()}"): result = await deepagent.ainvoke({"messages": [HumanMessage(payload.query)]}, config=config)` — NO module-level event loop, NO `run_until_complete`.
     - `response = result["messages"][-1].content[0]['text']`; `content, references = clean_output(response)`; `return ResearchResponse(content=content, references=references)`.
   - Drop unused imports: `flask_cors`, `queue`, `threading`, `json`, `AIMessageChunk`, `ToolMessage`, `make_store`.
+  - Add the console-script entrypoint required by SPEC Implementation Decisions › Run command: `def main(): uvicorn.run("src.api.app:app")` (add `import uvicorn`). This is what Task 1's `[project.scripts] deepagent-api = "src.api.app:main"` and Task 16's `uv run deepagent-api` invoke; without it the documented run command fails with `AttributeError: no attribute 'main'`. `uvicorn.run` inserts the CWD (`app_dir="."` default), so it boots from the project root with or without the editable install.
 - Do NOT yet add: the 400 empty-query check, the 500 exception handler, CORSMiddleware, or the result-file write — those are Tasks 10-13 red-green cycles.
 - Reference: SPEC Components § 5, Data Flow; reuse `src/observability/logging.py` `logger`, `src/observability/langfuse_config.py` `langfuse_handler`, `src/agents/research.py` `create_research_agent`/`clean_output` unchanged.
 
@@ -672,7 +691,7 @@ Expected failure: `assert []` / `assert False` — the sink is hardcoded to `log
 **Step 3: Implement**
 
 - Location: `src/observability/logging.py:7`
-- Key change: `log_file_name = f'{settings.LOGS_DIR}/{now.strftime("%Y-%m-%d")}.log'` (module already calls `get_settings()` at line 9; reference it). No `mkdir` needed — loguru auto-creates parents (`_file_sink.py:221-223`).
+- Key change: move `settings = get_settings()` (currently line 9) ABOVE the `log_file_name` assignment, then set `log_file_name = f'{settings.LOGS_DIR}/{now.strftime("%Y-%m-%d")}.log'` — line 7 currently executes before `settings` is defined, so referencing `settings` there would raise `NameError`. No `mkdir` needed — loguru auto-creates parents (`_file_sink.py:221-223`).
 
 **Step 4: Run test — expect GREEN**
 
@@ -822,12 +841,12 @@ git commit -m "test: enforce migration-surface coverage floor"
 | Empty/missing query rejected | Error handling | Integration | Task 10 |
 | Report written to configured path | Functional correctness | Integration | Task 13 (+ Task 3 paths unit) |
 | `clean_output` citation conversion | Functional correctness | Unit | Task 6 |
-| Model/project/credentials from config | Config correctness | Unit | Task 5 (+ Task 4 settings unit) |
+| Model/project/credentials from config | Config correctness | Unit | Task 5 (model/project + credentials-path tests) + Task 4 settings unit |
 | Logs directory configurable | Config correctness | Integration | Task 14 |
 | CORS enabled | Integration contract | Integration | Task 12 |
 | Uncaught exception → 500 JSON | Error handling | Integration | Task 11 |
-| App boots via uvicorn | Deployment | Manual/E2E | Task 16 |
-| Deps manifests + console script | — | infra | Task 1 |
+| App boots via uvicorn | Deployment | Manual/E2E | Task 16 (`main()` from Task 9) |
+| Deps manifests + console script | — | infra | Task 1 (build backend + `psycopg[binary]`) |
 | Test harness / import-side-effect stubs | — | infra | Task 2 |
 | Dead-code cleanup | — | infra | Task 7 |
 | README + `.env.example` | — | infra | Task 15 |
@@ -845,6 +864,6 @@ git commit -m "test: enforce migration-surface coverage floor"
 - **Missing error handling:** 400 (Task 10), 500 JSON (Task 11), tool-level errors remain in `handle_tool_errors` (unchanged).
 - **Hardcoded values:** all externalized to `settings.py` defaults; verified in Task 17 sweep.
 - **Tests for every testable behavior:** each of the 9 success criteria maps to ≥1 TDD/manual task; edge cases (missing/blank/empty query, absolute/relative result paths, CWD independence) are separate red-green cycles.
-- **Import side effects:** ddg_mcp `asyncio.run` handled in conftest (Task 2); lru-cached settings handled by the autouse `cache_clear` fixture + request-time `get_settings()`.
+- **Import side effects:** ddg_mcp `asyncio.run` stub + invalid-ADC `google.auth` patch in conftest (Task 2); `psycopg` import fixed via `psycopg[binary]` dependency (Task 1); lru-cached settings handled by the autouse `cache_clear` fixture + request-time `get_settings()`.
 - **Async/event-loop:** module-level loop and `run_until_complete` removed; `ainvoke` awaited natively (no idempotency concern — stateless POST, new thread_id per request).
 - **BUG-specific concerns:** N/A (SPEC source).
