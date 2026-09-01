@@ -41,3 +41,13 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/api", "src/config", "src/observability", "src/agents"]
+omit = [
+    "src/config/agent_configs.py",
+    "src/config/prompts.py",
+    "src/observability/langfuse_config.py",
+    "src/agents/subagents.py",
+    "src/tools/*",
+]
