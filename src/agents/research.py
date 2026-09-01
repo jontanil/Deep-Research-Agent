@@ -1,19 +1,17 @@
 import re
 from deepagents import create_deep_agent
 from langgraph.checkpoint.memory import MemorySaver
-from langchain.agents.structured_output import ToolStrategy
 
 from ..config import prompts
 from ..config.llm_models import create_reasoning_model, create_model
-from ..config.agent_configs import make_backend, handle_tool_errors
-from ..models.response_model import ResearchDocument
+from ..config.agent_configs import handle_tool_errors
 from ..observability.logging import logger
 from ..tools.google_search_tool import search_google
 from ..tools.web_scrape_tool import scrape_website
 from ..tools.ddg_mcp import tools
 from .subagents import get_custom_middleware, create_collector_agent, create_validator_agent, create_visualizer_agent
         
-def create_research_agent(settings, store):
+def create_research_agent(settings):
     try:
 
         if settings.DEEP_RESEARCH == 1:
@@ -46,9 +44,6 @@ def create_research_agent(settings, store):
             system_prompt= prompts.RESEARCH_PROMPT,
             checkpointer=MemorySaver(),
             middleware=[handle_tool_errors],
-            # backend=make_backend,
-            # store=store,
-            # response_format= ToolStrategy(ResearchDocument)
         )
     except Exception as e:
         logger.exception(str(e))
