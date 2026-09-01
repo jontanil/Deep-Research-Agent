@@ -1,7 +1,8 @@
 import pytest
 
 
-def test_research_returns_content_and_references(client):
+def test_research_returns_content_and_references(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("RESULT_OUTPUT_PATH", str(tmp_path / "out.md"))
     resp = client.post("/research", json={"query": "test query"})
     assert resp.status_code == 200
     body = resp.json()
@@ -40,3 +41,13 @@ def test_cors_preflight_allows_any_origin(client):
     )
     assert resp.status_code == 200
     assert resp.headers["access-control-allow-origin"] == "*"
+
+
+def test_research_writes_report_to_configured_path(client, monkeypatch, tmp_path):
+    out_path = tmp_path / "reports" / "out.md"
+    monkeypatch.setenv("RESULT_OUTPUT_PATH", str(out_path))
+    resp = client.post("/research", json={"query": "test query"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert out_path.exists()
+    assert out_path.read_text(encoding="utf-8") == body["content"]

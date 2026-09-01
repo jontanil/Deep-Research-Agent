@@ -9,6 +9,7 @@ from langchain_core.runnables import RunnableConfig
 
 from src.agents.research import create_research_agent, clean_output
 from src.api.schemas import ResearchRequest, ResearchResponse
+from src.config.paths import resolve_from_project_root
 from src.config.settings import get_settings
 from src.observability.langfuse_config import langfuse_handler
 from src.observability.logging import logger
@@ -41,6 +42,8 @@ async def research(payload: ResearchRequest):
     if not payload.query.strip():
         raise HTTPException(status_code=400, detail="No query found")
 
+    settings = get_settings()
+
     config: RunnableConfig = {
         "configurable": {"thread_id": str(uuid.uuid4())},
         "callbacks": [langfuse_handler],
@@ -57,6 +60,11 @@ async def research(payload: ResearchRequest):
 
     response = result["messages"][-1].content[0]["text"]
     content, references = clean_output(response)
+
+    out_path = resolve_from_project_root(settings.RESULT_OUTPUT_PATH)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(content, encoding="utf-8")
+
     return ResearchResponse(content=content, references=references)
 
 
