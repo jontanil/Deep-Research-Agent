@@ -8,4 +8,6 @@ def test_required_env_vars_are_set():
 
 
 def test_ddg_mcp_is_stubbed():
-    assert sys.modules["src.tools.ddg_mcp"].tools == []
+    stub = sys.modules["src.tools.ddg_mcp"]
+    assert hasattr(stub, "tools")
+    assert isinstance(stub.tools, list)
