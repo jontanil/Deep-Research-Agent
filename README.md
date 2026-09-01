@@ -80,7 +80,9 @@ POSTGRES_Url=
 Start the API server:
 
 ```bash
-flask --app src/api/app run
+uv run deepagent-api
+# or with reload during development:
+uv run uvicorn src.api.app:app --reload
 ```
 
 ## API
@@ -141,8 +143,8 @@ src/
 - `langchain-google-genai` — Gemini LLM integration
 - `google-search-results` — SerpAPI client
 - `langfuse` — Observability and tracing
-- `flask[async]` — Async API server
-- `flask-cors` — CORS support
+- `fastapi` — API framework
+- `uvicorn[standard]` — Async ASGI server
 - `loguru` — Structured logging
 - `langgraph-checkpoint-postgres` — Postgres checkpointing
 - `python-dotenv` — Environment variable loading
