@@ -21,10 +21,10 @@ class AgentSettings(BaseSettings):
     
     POSTGRES_URL : str
 
-    GCP_PROJECT_ID : str = "catalan-dev-484209"
-    GEMINI_CREDENTIALS_FILE : str = str(project_root() / "src/application_default_credentials.json")
-    GEMINI_MODEL : str = "gemini-3-flash-preview"
-    GEMINI_REASONING_MODEL : str = "gemini-3-flash-preview"
+    OPENAI_API_KEY : str = "not-configured"
+    OPENAI_BASE_URL : str = "https://api.openai.com/v1"
+    OPENAI_MODEL : str = "gpt-4o-mini"
+    OPENAI_REASONING_MODEL : str = "gpt-4o"
     RESULT_OUTPUT_PATH : str = "Result.md"
     LOGS_DIR : str = "logs"
     LANGFUSE_TAGS : list[str] = ["deepagent"]

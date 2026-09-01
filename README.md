@@ -30,7 +30,7 @@ The Research Agent enforces a strict workflow: collect → validate → visualiz
 ## Prerequisites
 
 - **SerpAPI API Key** — Get one at [serpapi.com](https://serpapi.com)
-- **Google Application Default Credentials** — JSON file for Google Generative AI (`application_default_credentials.json` in project root)
+- **An OpenAI-compatible LLM endpoint** (OpenAI, a local server, or any compatible proxy)
 - **Python 3.10+**
 
 ## Installation
@@ -47,8 +47,11 @@ Copy `.env.example` to `.env` and fill in your values:
 # SerpAPI (required)
 SERPAPI_API_KEY=your_serpapi_key
 
-# Google Cloud credentials (file path is auto-detected)
-# CREDENTIALS_FILE = src/application_default_credentials.json  # auto-resolved
+# OpenAI-compatible endpoint (required)
+OPENAI_API_KEY=your_key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_REASONING_MODEL=gpt-4o
 
 # Research modes (set DEEP_Research=1 for deep mode, 0 for quick mode)
 DEEP_Research=0

@@ -9,9 +9,6 @@ os.environ.setdefault("POSTGRES_URL", "postgresql://localhost/test")
 os.environ.setdefault("USER_AGENT", "deepagent-test")
 os.environ.setdefault("LOGS_DIR", tempfile.mkdtemp(prefix="deepagent-test-logs-"))
 
-import google.auth
-google.auth.load_credentials_from_file = lambda *a, **k: (object(), None)
-
 _ddg_stub = types.ModuleType("src.tools.ddg_mcp")
 _ddg_stub.tools = []
 sys.modules["src.tools.ddg_mcp"] = _ddg_stub

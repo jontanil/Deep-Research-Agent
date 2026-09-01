@@ -11,7 +11,7 @@ Deep Research Agent — multi-agent LangGraph research system (supervisor + coll
 
 ## Hard dependencies / gotchas
 
-- **Google ADC file is required at `src/application_default_credentials.json`** (resolved in `src/config/llm_models.py` relative to the config dir), NOT project root as README states. It also hardcodes GCP project `catalan-dev-484209`. Importing `llm_models` loads these credentials at module level.
+- **Google ADC file is no longer required.** Models use OpenAI-compatible endpoints configured via `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_REASONING_MODEL` in `.env` (see `src/config/llm_models.py`).
 - Models are **Google Gemini** (`gemini-3-flash-preview`). The `langchain-openrouter` code in `llm_models.py` is commented out — OpenRouter is not actually used.
 - `src/tools/ddg_mcp.py` runs `asyncio.run()` at import to spawn `uvx duckduckgo-mcp-server` (stdio MCP). Importing the agents/tools chain requires `uvx` available and network. The shared `tools` list is mutated via `append` across `subagents.py` and `research.py` — ordering/cumulative behavior is intentional but easy to break.
 - `.env` env var names in code are `DEEP_RESEARCH=0` etc. (README's `DEEP_Research` casing is wrong — trust `settings.py`).
