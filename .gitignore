@@ -1,6 +1,7 @@
 logs
 Content.md
 Result.md
+.opencode/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
