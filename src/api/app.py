@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langfuse import propagate_attributes
 from langchain_core.messages import HumanMessage
@@ -13,6 +14,14 @@ from src.observability.langfuse_config import langfuse_handler
 from src.observability.logging import logger
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 settings = get_settings()
 deepagent = create_research_agent(settings)

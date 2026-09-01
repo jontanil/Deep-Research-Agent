@@ -28,3 +28,15 @@ def test_uncaught_exception_returns_500_json(client, monkeypatch):
     resp = client.post("/research", json={"query": "test query"})
     assert resp.status_code == 500
     assert resp.json() == {"status": "error", "message": "Internal server error"}
+
+
+def test_cors_preflight_allows_any_origin(client):
+    resp = client.options(
+        "/research",
+        headers={
+            "Origin": "http://example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "*"
