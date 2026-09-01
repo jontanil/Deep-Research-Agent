@@ -6,7 +6,8 @@ google-search-results
 python-dotenv
 beautifulsoup4
 langfuse
-flask[async]
-flask-cors
+fastapi
+uvicorn[standard]
 loguru
 langgraph-checkpoint-postgres
+psycopg[binary]
