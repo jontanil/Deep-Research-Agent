@@ -58,7 +58,12 @@ async def research(payload: ResearchRequest):
             {"messages": [HumanMessage(payload.query)]}, config=config
         )
 
-    response = result["messages"][-1].content[0]["text"]
+    content = result["messages"][-1].content
+    response = (
+        content
+        if isinstance(content, str)
+        else "".join(block.get("text", "") for block in content if isinstance(block, dict))
+    )
     content, references = clean_output(response)
 
     out_path = resolve_from_project_root(settings.RESULT_OUTPUT_PATH)
